@@ -264,6 +264,35 @@ ALTER TABLE ORDERDETAIL
  GRANT ALTER ON SAM.POINTS TO IU;
  GRANT CREATE VIEW TO IU;
  
+ -----------------------------------------------
+ /* 2020-10-27 */
+ -----------------------------------------------
+ CREATE TABLE HISTORY(
+HI_EMCODE NCHAR(4),
+HI_ACCESSDATE DATE,
+HI_STATE NUMBER(1,0)
+)TABLESPACE USERS;
+
+ALTER TABLE HISTORY
+ADD HI_EMSTCODE NCHAR(4);
+
+ALTER TABLE HISTORY
+MODIFY HI_STATE NOT NULL
+MODIFY HI_ACCESSDATE DEFAULT SYSDATE;
+
+ALTER TABLE HISTORY
+ADD CONSTRAINT HI_EMSTCODE_EMCODE_ACDATE_PK PRIMARY KEY(HI_EMSTCODE, HI_EMCODE, HI_ACCESSDATE);
+
+ALTER TABLE HISTORY
+ADD CONSTRAINT HI_EMSTCODE_EMCODE_FK FOREIGN KEY(HI_EMSTCODE, HI_EMCODE) REFERENCES EMPLOYEES(EM_STCODE, EM_CODE);
+  
+CREATE PUBLIC SYNONYM HI FOR SAM.HISTORY;
+  
+GRANT SELECT, INSERT, UPDATE, ALTER ON SAM.HISTORY TO FANA;
+GRANT SELECT ON SAM.HISTORY TO NITO;
+GRANT SELECT ON SAM.HISTORY TO IU;
+GRANT SELECT ON SAM.HISTORY TO SON;
+ 
 SELECT * FROM USER_TAB_PRIVS_RECD;
 
 /* 2020-10-22 SELECT 
@@ -761,8 +790,11 @@ WHERE ODCODE >= '20201013' AND ODCODE <= '20201015';
 /* 특정 상품의 월별 매출 추이 
     --------------------------------------
       매출월        주문건수       매출액
+      OD/OT          OD         OT * GO
     --------------------------------------
 */
+SELECT * FROM OD;
+
 SELECT TO_CHAR(OD_CODE, 'YYYYMM'),
         COUNT(OD_CODE)
 FROM OD
@@ -779,7 +811,10 @@ GROUP BY SUBSTR(FV2.ODCODE, 1, 6), TEM.COUNT;
 
 /* 특정월의 베스트 상품(판매갯수) 현황 
     ------------------------------------------------------
-      매출월    상품코드    상품명    주문건수       매출액
+      매출월    상품코드    상품명    주문건수    판매갯수       매출액
+      OD/OT     OT/GO       GO        OT        OT           OT*GO
+FV2.ODCODE,FV2.GOCODE,FV2.GONAME,FV2.COUNT,FV2.OTQTY,FV2.PRICE
+      FV2
     ------------------------------------------------------
 */
 CREATE OR REPLACE VIEW TEM2
@@ -804,6 +839,186 @@ WHERE (MONTHS, QTY) IN(SELECT MONTHS,
                                 MAX(QTY)
                         FROM TEM2
                         GROUP BY MONTHS);
+                        
+/*2020-10-27*/
+/* 월별 매출 추이 
+    --------------------------------------
+      매출월        주문건수       매출액
+    --------------------------------------
+*/
+/*
+SELECT TO_CHAR(OD_CODE, 'YYYYMM'),
+        COUNT(OD_CODE)
+FROM OD
+GROUP BY TO_CHAR(OD_CODE, 'YYYYMM');
+*/
+SELECT TO_CHAR(FV1.ODCODE, 'YYYYMM') AS "MONTHS",
+        TEM.COUNT,
+        SUM(PRICE)
+FROM FV1 INNER JOIN (SELECT TO_CHAR(OD_CODE, 'YYYYMM') AS "ODCODE",
+                           COUNT(OD_CODE) AS "COUNT"
+                    FROM OD
+                    GROUP BY TO_CHAR(OD_CODE, 'YYYYMM')) TEM ON TO_CHAR(FV1.ODCODE, 'YYYYMM') = TEM.ODCODE
+GROUP BY TO_CHAR(FV1.ODCODE, 'YYYYMM'), TEM.COUNT;
+
+/* 특정 상품의 월별 매출 추이 
+    --------------------------------------
+      매출월        주문건수       매출액
+    --------------------------------------
+*/
+SELECT TO_CHAR(ODCODE, 'YYYYMM') AS "MONTHS",
+        COUNT(ODCODE) AS "COUNT",
+        SUM(PRICE) AS "PRICE"
+FROM FV1
+WHERE GOCODE = 'G005'
+GROUP BY TO_CHAR(ODCODE, 'YYYYMM');
+
+/* 특정월의 베스트 상품(판매갯수) 현황 
+    ----------------------------------------------------------
+      매출월    상품코드    상품명    주문건수    판매갯수    매출액
+    ----------------------------------------------------------
+*/
+/*
+SELECT TO_CHAR(ODCODE, 'YYYYMM') AS "MONTHS",
+        GOCODE AS "GOCODE",
+        GONAME AS "GONAME",
+        COUNT(ODCODE) AS "ODCOUNT",
+        SUM(OTQTY) AS "OTQTY",
+        SUM(PRICE) AS "PRICE"
+FROM FV1
+GROUP BY TO_CHAR(ODCODE, 'YYYYMM'), GOCODE, GONAME;
+*/
+/*
+SELECT TEM.MONTHS,
+        MAX(TEM.OTQTY)
+FROM (SELECT TO_CHAR(ODCODE, 'YYYYMM') AS "MONTHS",
+            GOCODE AS "GOCODE",
+            GONAME AS "GONAME",
+            COUNT(ODCODE) AS "ODCOUNT",
+            SUM(OTQTY) AS "OTQTY",
+            SUM(PRICE) AS "PRICE"
+    FROM FV1
+    GROUP BY TO_CHAR(ODCODE, 'YYYYMM'), GOCODE, GONAME)TEM
+GROUP BY TEM.MONTHS;
+*/
+/*
+SELECT *
+FROM (SELECT TO_CHAR(ODCODE, 'YYYYMM') AS "MONTHS",
+            GOCODE AS "GOCODE",
+            GONAME AS "GONAME",
+            SUM(OTQTY) AS "OTQTY",
+            SUM(PRICE) AS "PRICE"
+    FROM FV1
+    GROUP BY TO_CHAR(ODCODE, 'YYYYMM'), GOCODE, GONAME)TEM2
+WHERE (TEM2.MONTHS, TEM2.OTQTY) IN(SELECT TEM1.MONTHS,
+                                        MAX(TEM1.OTQTY)
+                                FROM (SELECT TO_CHAR(ODCODE, 'YYYYMM') AS "MONTHS",
+                                            GOCODE AS "GOCODE",
+                                            GONAME AS "GONAME",
+                                            SUM(OTQTY) AS "OTQTY",
+                                            SUM(PRICE) AS "PRICE"
+                                    FROM FV1
+                                    GROUP BY TO_CHAR(ODCODE, 'YYYYMM'), GOCODE, GONAME)TEM1
+                                GROUP BY TEM1.MONTHS);
+*/                                
+SELECT *
+FROM (SELECT TO_CHAR(ODCODE, 'YYYYMM') AS "MONTHS",
+            GOCODE AS "GOCODE",
+            GONAME AS "GONAME",
+            SUM(OTQTY) AS "OTQTY",
+            SUM(PRICE) AS "PRICE"
+    FROM FV1
+    GROUP BY TO_CHAR(ODCODE, 'YYYYMM'), GOCODE, GONAME)TEM1
+WHERE TEM1.MONTHS = '202009' AND
+    (TEM1.MONTHS, TEM1.OTQTY) IN(SELECT TEM2.MONTHS,
+                                        MAX(TEM2.OTQTY)
+                                FROM (SELECT TO_CHAR(ODCODE, 'YYYYMM') AS "MONTHS",
+                                            GOCODE AS "GOCODE",
+                                            GONAME AS "GONAME",
+                                            SUM(OTQTY) AS "OTQTY",
+                                            SUM(PRICE) AS "PRICE"
+                                    FROM FV1
+                                    GROUP BY TO_CHAR(ODCODE, 'YYYYMM'), GOCODE, GONAME)TEM2
+                                GROUP BY TEM2.MONTHS);
+/* 시간대별 매출추이 
+    --------------------------------
+      시간     평균주문건수  평균매출액
+    --------------------------------
+*/
+/*
+SELECT TO_CHAR(OD_CODE, 'YYYYMMDDHH24') AS "HOUR",
+        COUNT(OD_CODE) AS "ODCOUNT"
+FROM OD
+GROUP BY TO_CHAR(OD_CODE, 'YYYYMMDDHH24');
+*/
+SELECT SUBSTR(TEM."HOUR", 9, 2) || '시' AS "시간",
+        ROUND(AVG(TEM.ODCOUNT), 1) AS "평균주문건수",
+        TO_CHAR(ROUND(AVG(FV1.PRICE), 1), '999,999.0') AS "평균매출액"
+FROM FV1 INNER JOIN (SELECT TO_CHAR(OD_CODE, 'YYYYMMDDHH24') AS "HOUR",
+                            COUNT(OD_CODE) AS "ODCOUNT"
+                            FROM OD
+                            GROUP BY TO_CHAR(OD_CODE, 'YYYYMMDDHH24'))TEM ON TO_CHAR(FV1.ODCODE, 'YYYYMMDDHH24') = TEM."HOUR"
+GROUP BY SUBSTR(TEM."HOUR", 9, 2) || '시';
+
+/* 요일별 매출추이 
+    --------------------------------
+      요일     평균주문건수  평균매출액
+    --------------------------------
+*/
+/*
+SELECT TO_CHAR(OD_CODE, 'YYYYMMDD') AS "DATE",
+        TO_CHAR(OD_CODE, 'DAY') AS "DAY",
+        COUNT(OD_CODE) AS "ODCOUNT"
+FROM OD
+GROUP BY TO_CHAR(OD_CODE, 'YYYYMMDD'), TO_CHAR(OD_CODE, 'DAY');
+
+SELECT TO_CHAR(ODCODE, 'YYYYMMDD') AS "DATE",
+        TO_CHAR(ODCODE, 'DAY') AS "DAY",
+        SUM(PRICE) AS "PRICE"
+FROM FV1
+GROUP BY TO_CHAR(ODCODE, 'YYYYMMDD'), TO_CHAR(ODCODE, 'DAY');
+*/
+SELECT TEM1."DAY" AS "요일",
+        ROUND(AVG(TEM2.ODCOUNT),1) AS "평균주문건수",
+        TO_CHAR(ROUND(AVG(TEM1.PRICE),1), '999,999,999.0') AS "평균매출액"
+FROM (SELECT TO_CHAR(ODCODE, 'YYYYMMDD') AS "DATE",
+            TO_CHAR(ODCODE, 'DAY') AS "DAY",
+            SUM(PRICE) AS "PRICE"
+        FROM FV1
+        GROUP BY TO_CHAR(ODCODE, 'YYYYMMDD'), TO_CHAR(ODCODE, 'DAY'))TEM1 INNER JOIN
+    (SELECT TO_CHAR(OD_CODE, 'YYYYMMDD') AS "DATE",
+            TO_CHAR(OD_CODE, 'DAY') AS "DAY",
+            COUNT(OD_CODE) AS "ODCOUNT"
+        FROM OD
+        GROUP BY TO_CHAR(OD_CODE, 'YYYYMMDD'), TO_CHAR(OD_CODE, 'DAY'))TEM2 ON TEM1."DAY" = TEM2."DAY" AND TEM1."DATE" = TEM2."DATE"
+GROUP BY TEM1."DAY";
+/*
+SELECT TO_CHAR(OD_CODE, 'YYYYMMDD') AS "DATE",
+        TO_CHAR(OD_CODE, 'DAY') AS "DAY",
+        COUNT(*) AS "ODCOUNT"
+FROM OD
+GROUP BY TO_CHAR(OD_CODE, 'YYYYMMDD'), TO_CHAR(OD_CODE, 'DAY');
+
+SELECT TO_CHAR(OT.OT_ODCODE, 'YYYYMMDD') AS "DATE",
+        TO_CHAR(OT.OT_ODCODE, 'DAY') AS "DAY",
+        SUM(OT.OT_QTY * GO.GO_PRICE) AS "PRICE"
+FROM OT INNER JOIN GO ON OT.OT_GOCODE = GO.GO_CODE
+GROUP BY TO_CHAR(OT.OT_ODCODE, 'YYYYMMDD'), TO_CHAR(OT.OT_ODCODE, 'DAY');
+*/
+SELECT TEM1."DAY" AS "요일",
+        ROUND(AVG(TEM1.ODCOUNT), 1) AS "평균주문건수",
+        TO_CHAR(ROUND(AVG(TEM2.PRICE), 1), '999,999,999.0') AS "평균매출액"
+FROM (SELECT TO_CHAR(OD_CODE, 'YYYYMMDD') AS "DATE",
+            TO_CHAR(OD_CODE, 'DAY') AS "DAY",
+            COUNT(*) AS "ODCOUNT"
+        FROM OD
+        GROUP BY TO_CHAR(OD_CODE, 'YYYYMMDD'), TO_CHAR(OD_CODE, 'DAY')) TEM1
+        INNER JOIN (SELECT TO_CHAR(OT.OT_ODCODE, 'YYYYMMDD') AS "DATE",
+                            TO_CHAR(OT.OT_ODCODE, 'DAY') AS "DAY",
+                            SUM(OT.OT_QTY * GO.GO_PRICE) AS "PRICE"
+                    FROM OT INNER JOIN GO ON OT.OT_GOCODE = GO.GO_CODE
+                    GROUP BY TO_CHAR(OT.OT_ODCODE, 'YYYYMMDD'), TO_CHAR(OT.OT_ODCODE, 'DAY')) TEM2 ON TEM1."DAY" = TEM2."DAY" AND TEM1."DATE" = TEM2."DATE"
+GROUP BY TEM1."DAY";
 
 --TEAM_SAM_FANA
 INSERT INTO ST(ST_CODE, ST_NAME, ST_ADDR)
@@ -847,6 +1062,43 @@ INSERT INTO "EM"(EM_STCODE, EM_CODE, EM_PWD, EM_NAME, EM_LEVEL)
 VALUES('S004', 'E403', '4444', '유영민', 'A');
 INSERT INTO "EM"(EM_STCODE, EM_CODE, EM_PWD, EM_NAME, EM_LEVEL)
 VALUES('S004', 'E404', '4444', '김민기', 'M');
+
+ALTER TABLE SAM.HISTORY
+MODIFY HI_STATE DEFAULT 0;
+
+SELECT COUNT(*)
+FROM EM
+WHERE EM_CODE = 'E101' AND EM_STCODE = 'S001';
+
+SELECT COUNT(*)
+FROM EM
+WHERE EM_STCODE = 'S001' AND EM_CODE = 'E101' AND EM_PWD = '1111';
+
+SELECT HI_EMSTCODE AS "STCODE",
+        HI_EMCODE AS "EMCODE",
+        SUM(HI_STATE) AS "STATE"
+FROM HI
+GROUP BY HI_EMSTCODE, HI_EMCODE;
+
+INSERT INTO HI(HI_EMSTCODE, HI_EMCODE, HI_ACCESSDATE, HI_STATE)
+VALUES('S001', 'E101', DEFAULT, 1);
+INSERT INTO HI(HI_EMSTCODE, HI_EMCODE, HI_ACCESSDATE, HI_STATE)
+VALUES('S001', 'E101', DEFAULT, -1);
+
+SELECT * FROM HI;
+
+SELECT ST.ST_NAME AS "STNAME",
+        "EM".EM_NAME AS "EMNAME",
+        "EM".EM_LEVEL AS "EMLEVEL",
+        MAX(HI.HI_ACCESSDATE) AS "HIACCESSDATE",
+        HI.HI_EMSTCODE AS "STCODE",
+        HI.HI_EMCODE AS "EMCODE"
+FROM HI INNER JOIN "EM" ON HI.HI_EMCODE = "EM".EM_CODE AND HI.HI_EMSTCODE = "EM".EM_STCODE
+        INNER JOIN ST ON HI.HI_EMSTCODE = ST.ST_CODE
+WHERE HI.HI_STATE = 1
+        AND HI.HI_EMSTCODE = 'S001'
+        AND HI.HI_EMCODE = 'E101'
+GROUP BY ST.ST_NAME, "EM".EM_NAME, "EM".EM_LEVEL, HI.HI_EMSTCODE, HI.HI_EMCODE;
 
 SELECT * FROM ST;
 SELECT * FROM "EM";
