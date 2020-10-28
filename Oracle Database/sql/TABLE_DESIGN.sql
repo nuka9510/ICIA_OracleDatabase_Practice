@@ -1311,7 +1311,7 @@ WHERE (SALESMONTH, QTY) IN(SELECT SALESMONTH, MAX(QTY)
 */
 -- GROUPING1 --> 일별 시간별 합산
 SELECT  TO_CHAR(OD_CODE, 'YYYYMMDDHH24') AS SALESDAYTIME, 
-        COUNT(*) AS ORDERS
+        COUNT(OD_CODE) AS ORDERS
 FROM OD
 GROUP BY TO_CHAR(OD_CODE, 'YYYYMMDDHH24');
 
@@ -1359,17 +1359,136 @@ INNER JOIN
             GROUP BY TO_CHAR(OT_ODCODE, 'YYYYMMDDHH24'))
         GROUP BY SUBSTR(SALESDAYTIME, 9,2)) GR2
 ON GR1.SALESTIME = GR2.SALESTIME;
+
+
 /* 요일별 매출추이 
     --------------------------------
       요일     평균주문건수  평균매출액
     --------------------------------
 */
+CREATE OR REPLACE VIEW V1
+AS
+SELECT SALESDAY AS SALESDAY, 
+       TO_CHAR(ROUND(AVG(ORDERS),1), '9,990.0') AS ORDERSAVG
+FROM (SELECT  TO_CHAR(OD_CODE, 'YYYYMMDD') AS SALESDATE,
+              TO_CHAR(OD_CODE, 'DAY') AS SALESDAY,
+              COUNT(*) AS ORDERS
+      FROM OD
+      GROUP BY TO_CHAR(OD_CODE, 'YYYYMMDD'),TO_CHAR(OD_CODE, 'DAY'))
+GROUP BY SALESDAY;
+
+CREATE OR REPLACE VIEW V2
+AS
+SELECT  SALESDAY AS SALESDAY,
+        TO_CHAR(ROUND(AVG(DAYAMOUNT), 1), '999,990.0') AS AMOUNTAVG
+FROM (SELECT  TO_CHAR(OT_ODCODE, 'YYYYMMDD') AS SALESDATE,
+              TO_CHAR(OT_ODCODE, 'DAY') AS SALESDAY,
+              SUM(OT.OT_QTY * GO.GO_PRICE) AS DAYAMOUNT
+      FROM OT INNER JOIN GO ON OT.OT_GOCODE = GO.GO_CODE
+      GROUP BY TO_CHAR(OT_ODCODE, 'YYYYMMDD'), TO_CHAR(OT_ODCODE, 'DAY'))
+GROUP BY SALESDAY;
+
+SELECT V1.SALESDAY, V1.ORDERSAVG, V2.AMOUNTAVG
+FROM V1 INNER JOIN V2 ON V1.SALESDAY = V2.SALESDAY;
+
+/* 2020-10-28 OUTER JOIN 
+   OUTER JOIN
+    - 두 개의 테이블에 공통된 데이터를 가진 컬럼이 존재
+    - [LEFT | RIGHT | FULL] OUTER JOIN
+       지정한 방향의 테이블의 데이터는 조인 조건에 만족하지 않아도 강제 출력
+    - NULL DATA의 회피 강구
+      -- NVL, NVL2, * COALESCE() 
+*/
+-- 상품별 매출현황
+/*--------------------------------------------
+   상품코드   상품명    판매량     총매출액
+---------------------------------------------*/
+SELECT * FROM GO;
+SELECT * FROM OT;
+
+SELECT  GO.GO_CODE AS GOCODE,
+        GO.GO_NAME AS GONAME,
+        SUM(COALESCE(OT.OT_QTY, 0)) AS QTY,
+        SUM(COALESCE(OT.OT_QTY * GO.GO_PRICE, 0)) AS AMOUNT
+FROM OT RIGHT OUTER JOIN GO ON OT.OT_GOCODE = GO.GO_CODE
+GROUP BY GO_CODE, GO.GO_NAME;
+
+/* OUTER JOIN의 활용예제 */
+/* 1. 특정 상점의 직원의 로그인과 로그아웃 횟수 기록 출력 
+    ---------------------------------------------
+      사원코드   사원명   로그인횟수   로그아웃 횟수
+    ---------------------------------------------
+*/ 
+-- STEP 1. 로그인-아웃 횟수 조회
+SELECT HI_EMSTCODE AS STCODE, HI_EMCODE AS EMCODE, COUNT(HI_STATE) AS INCNT
+FROM HI 
+WHERE HI_STATE = 1
+GROUP BY HI_EMSTCODE, HI_EMCODE;
+
+SELECT HI_EMSTCODE AS STCODE, HI_EMCODE AS EMCODE, COUNT(HI_STATE) AS OUTCNT
+FROM HI 
+WHERE HI_STATE = -1
+GROUP BY HI_EMSTCODE, HI_EMCODE;
+
+-- STEP 2. STEP1에서 조회한 QUERY를 FULL OUTER 조인 후 VIEW 생성
+CREATE OR REPLACE VIEW ACCESSINFO
+AS
+SELECT  COALESCE(LI.STCODE, LO.STCODE) AS STCODE,
+        COALESCE(LI.EMCODE, LO.EMCODE) AS EMCODE,
+        COALESCE(LI.INCNT, 0) AS INCNT,
+        COALESCE(LO.OUTCNT, 0) AS OUTCNT
+FROM (SELECT HI_EMSTCODE AS STCODE, HI_EMCODE AS EMCODE, COUNT(HI_STATE) AS INCNT
+      FROM HI 
+      WHERE HI_STATE = 1
+      GROUP BY HI_EMSTCODE, HI_EMCODE) LI
+     FULL OUTER JOIN 
+     (SELECT HI_EMSTCODE AS STCODE, HI_EMCODE AS EMCODE, COUNT(HI_STATE) AS OUTCNT
+      FROM HI 
+      WHERE HI_STATE = -1
+      GROUP BY HI_EMSTCODE, HI_EMCODE) LO
+     ON LI.STCODE = LO.STCODE AND LI.EMCODE = LO.EMCODE;
+
+SELECT * FROM ACCESSINFO;
+-- STEP 3. EMPLOYEES 테이블과의 조인
+SELECT EM.EM_STCODE AS STCODE, 
+       EM.EM_CODE AS EMCODE,
+       EM.EM_NAME AS EMNAME,
+       COALESCE(AC.INCNT,0) AS INCNT, 
+       COALESCE(AC.OUTCNT, 0) AS OUTCNT
+FROM EM LEFT OUTER JOIN ACCESSINFO AC 
+ON EM.EM_STCODE = AC.STCODE AND EM.EM_CODE = AC.EMCODE;
+
+/* 2. 특정 상점의 모든 직원중 로그인 횟수가 가장 많은 직원의 정보 출력 
+    ----------------------------------------
+      사원코드   사원명   로그인횟수   사원등급
+    ----------------------------------------
+    *** 출력 컬럼에 로그인 횟수가 없다면 SUB-QUERY로만 진행
+*/ 
+SELECT EM.EM_STCODE, EM.EM_CODE, AI.INCNT, EM.EM_LEVEL 
+FROM ACCESSINFO AI INNER JOIN EM 
+ON AI.STCODE = EM.EM_STCODE AND AI.EMCODE = EM.EM_CODE
+WHERE INCNT IN (SELECT MAX(INCNT) FROM ACCESSINFO);
+
+/* 3. 특정 상점의 모든 직원을 대상으로 직원별 판매실적을 출력
+    ----------------------------------------
+      사원코드   사원명   주문건수    매출액
+    ----------------------------------------
+*/ 
+-- STEP 1. 사원별 주문건수 통계 작성
 
 
 
 
+/* 4. 모든 상품의 정보 출력
+    --------------------------------------------
+      상품코드   상품명   가격    재고     유통기한
+    --------------------------------------------
+*/ 
 
-
-
+/* 5. 4의 결과중 판매가능한 상품정보를 출력
+    --------------------------------------------
+      상품코드   상품명   가격    재고     유통기한
+    --------------------------------------------
+*/ 
 
 
